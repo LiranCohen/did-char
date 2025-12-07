@@ -135,12 +135,23 @@ func UpdateDID(
 		}
 	}
 
-	// Get next ballot number
-	lastBallot, err := store.GetLastBallotNumber()
+	// Get next available ballot number from CHAR
+	// Use last synced ballot as starting point (not last operation ballot)
+	lastSyncedStr, err := store.GetSyncState("last_synced_ballot")
 	if err != nil {
-		return fmt.Errorf("failed to get last ballot: %w", err)
+		return fmt.Errorf("failed to get sync state: %w", err)
 	}
-	ballotNumber := lastBallot + 1
+
+	startBallot := 0
+	if lastSyncedStr != "" {
+		fmt.Sscanf(lastSyncedStr, "%d", &startBallot)
+	}
+
+	// Search for next empty ballot starting from last synced + 1
+	ballotNumber, err := charClient.GetNextAvailableBallot(cfg.CHAR.AppPreimage, startBallot+1)
+	if err != nil {
+		return fmt.Errorf("failed to find available ballot: %w", err)
+	}
 
 	// Encode payload
 	suffix, _ := ParseDID(req.DID)
@@ -164,27 +175,10 @@ func UpdateDID(
 		return fmt.Errorf("ballot %d not confirmed", ballotNumber)
 	}
 
-	// Update database
-	docJSON, _ := json.Marshal(updatedDoc)
-	didRecord.Document = string(docJSON)
-	didRecord.UpdateCommitment = newCommitment
-	didRecord.LastOperationBallot = ballotNumber
-
-	if err := store.SaveDID(didRecord); err != nil {
-		return fmt.Errorf("failed to update DID: %w", err)
-	}
-
-	// Save operation
-	opJSON, _ := json.Marshal(updateOp)
-	opRecord := &storage.OperationRecord{
-		DID:           req.DID,
-		BallotNumber:  ballotNumber,
-		OperationType: "update",
-		OperationData: string(opJSON),
-	}
-
-	if err := store.SaveOperation(opRecord); err != nil {
-		return fmt.Errorf("failed to save operation: %w", err)
+	// Now process the ballot to write to SQLite
+	processor := NewProcessor(store, charClient, cfg.CHAR.AppPreimage)
+	if err := processor.ProcessBallot(ballotNumber); err != nil {
+		return fmt.Errorf("failed to process ballot: %w", err)
 	}
 
 	// Update key file with new commitment

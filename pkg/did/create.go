@@ -2,7 +2,6 @@ package did
 
 import (
 	"crypto/ecdsa"
-	"encoding/json"
 	"fmt"
 
 	"github.com/yourusername/did-char/pkg/char"
@@ -98,12 +97,23 @@ func CreateDID(
 		doc.PublicKeys[0].Controller = did
 	}
 
-	// Get next ballot number
-	lastBallot, err := store.GetLastBallotNumber()
+	// Get next available ballot number from CHAR
+	// Use last synced ballot as starting point (not last operation ballot)
+	lastSyncedStr, err := store.GetSyncState("last_synced_ballot")
 	if err != nil {
-		return nil, fmt.Errorf("failed to get last ballot: %w", err)
+		return nil, fmt.Errorf("failed to get sync state: %w", err)
 	}
-	ballotNumber := lastBallot + 1
+
+	startBallot := 0
+	if lastSyncedStr != "" {
+		fmt.Sscanf(lastSyncedStr, "%d", &startBallot)
+	}
+
+	// Search for next empty ballot starting from last synced + 1
+	ballotNumber, err := charClient.GetNextAvailableBallot(cfg.CHAR.AppPreimage, startBallot+1)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find available ballot: %w", err)
+	}
 
 	// Encode payload
 	payloadHex, err := encoding.EncodePayload(encoding.OperationTypeCreate, suffix, createOp)
@@ -126,33 +136,10 @@ func CreateDID(
 		return nil, fmt.Errorf("ballot %d not confirmed", ballotNumber)
 	}
 
-	// Save to database
-	docJSON, _ := json.Marshal(doc)
-	didRecord := &storage.DIDRecord{
-		DID:                 did,
-		Status:              "active",
-		Document:            string(docJSON),
-		UpdateCommitment:    updateCommitment,
-		RecoveryCommitment:  recoveryCommitment,
-		CreatedAtBallot:     ballotNumber,
-		LastOperationBallot: ballotNumber,
-	}
-
-	if err := store.SaveDID(didRecord); err != nil {
-		return nil, fmt.Errorf("failed to save DID: %w", err)
-	}
-
-	// Save operation
-	opJSON, _ := json.Marshal(createOp)
-	opRecord := &storage.OperationRecord{
-		DID:           did,
-		BallotNumber:  ballotNumber,
-		OperationType: "create",
-		OperationData: string(opJSON),
-	}
-
-	if err := store.SaveOperation(opRecord); err != nil {
-		return nil, fmt.Errorf("failed to save operation: %w", err)
+	// Now process the ballot to write to SQLite
+	processor := NewProcessor(store, charClient, cfg.CHAR.AppPreimage)
+	if err := processor.ProcessBallot(ballotNumber); err != nil {
+		return nil, fmt.Errorf("failed to process ballot: %w", err)
 	}
 
 	// Create key file

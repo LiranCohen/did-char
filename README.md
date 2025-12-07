@@ -15,10 +15,14 @@ DID-CHAR combines:
 # Build
 go build -o did-char ./cmd/did-char
 
-# Run the demo
-./demo.sh
+# Run the multi-node replication demo (recommended!)
+./demo-replication.sh
 
-# Or try commands manually:
+# Or sync from existing CHAR ballots:
+./did-char sync --verbose
+./did-char status
+
+# Try commands manually:
 
 # Create a DID (generates keys automatically)
 ./did-char create --verbose
@@ -42,10 +46,13 @@ go build -o did-char ./cmd/did-char
 
 ## Core Commands
 
+- `did-char sync` - Sync ballots from CHAR to reconstruct DID state
 - `did-char create` - Create a new DID with auto-generated keys
 - `did-char update <did>` - Update a DID document (reads keys from `did_char_<did>.json`)
 - `did-char resolve <did>` - Resolve a DID to its current state
-- `did-char deactivate <did>` - Permanently deactivate a DID (reads keys from file)
+- `did-char status` - Show database statistics and recent operations
+- `did-char generate-key` - Generate random test keys
+- `did-char generate-service` - Generate random test service endpoints
 
 ## Key Management
 

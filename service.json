@@ -1,0 +1,5 @@
+{
+  "id": "service-nvfi",
+  "serviceEndpoint": "https://sufficient-posse-3853.example.com",
+  "type": "LinkedDomains"
+}

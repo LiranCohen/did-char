@@ -46,14 +46,14 @@ func DefaultConfig() *Config {
 			RPCPassword: "char",
 			Network:     "regtest",
 			AppDomain:   "did-char-domain",
-			AppPreimage: "6469642d636861722d646f6d61696e", // hex("did-char-domain")
+			AppPreimage: "did-char-domain", // Plain text, will be hex-encoded by client
 		},
 		Database: DatabaseConfig{
 			Path: "./did-char.db",
 		},
 		Polling: PollingConfig{
-			MaxAttempts:    30,
-			IntervalMS:     100,
+			MaxAttempts:    300,  // Poll for up to 30 seconds
+			IntervalMS:     100,  // Check every 100ms
 			TimeoutSeconds: 10,
 		},
 	}
