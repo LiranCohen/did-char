@@ -4,7 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"os/exec"
+	"io"
+	"net/http"
 	"time"
 
 	"github.com/yourusername/did-char/pkg/config"
@@ -20,42 +21,78 @@ func NewClient(cfg *config.CHARConfig) *Client {
 	return &Client{cfg: cfg}
 }
 
-// rpcCall executes a bitcoin-cli RPC command
+// RPCRequest represents a JSON-RPC request
+type RPCRequest struct {
+	JSONRPC string        `json:"jsonrpc"`
+	ID      string        `json:"id"`
+	Method  string        `json:"method"`
+	Params  []interface{} `json:"params"`
+}
+
+// RPCResponse represents a JSON-RPC response
+type RPCResponse struct {
+	Result json.RawMessage `json:"result"`
+	Error  *RPCError       `json:"error"`
+	ID     string          `json:"id"`
+}
+
+// RPCError represents a JSON-RPC error
+type RPCError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+// rpcCall executes a JSON-RPC HTTP request
 func (c *Client) rpcCall(method string, params ...interface{}) ([]byte, error) {
-	// Build bitcoin-cli command
-	args := c.cfg.BitcoinCLIArgs()
-	args = append(args, method)
-
-	// Add parameters
-	for _, param := range params {
-		switch v := param.(type) {
-		case string:
-			args = append(args, v)
-		case int:
-			args = append(args, fmt.Sprintf("%d", v))
-		case bool:
-			args = append(args, fmt.Sprintf("%t", v))
-		default:
-			// For complex types, marshal to JSON
-			jsonBytes, err := json.Marshal(v)
-			if err != nil {
-				return nil, fmt.Errorf("failed to marshal parameter: %w", err)
-			}
-			args = append(args, string(jsonBytes))
-		}
+	// Build JSON-RPC request
+	req := RPCRequest{
+		JSONRPC: "1.0",
+		ID:      "did-char",
+		Method:  method,
+		Params:  params,
 	}
 
-	// Execute command
-	cmd := exec.Command("bitcoin-cli", args...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("bitcoin-cli error: %s: %w", stderr.String(), err)
+	reqBody, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	return stdout.Bytes(), nil
+	// Create HTTP request
+	url := fmt.Sprintf("http://%s:%d/", c.cfg.RPCHost, c.cfg.RPCPort)
+	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(reqBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "text/plain")
+	httpReq.SetBasicAuth(c.cfg.RPCUser, c.cfg.RPCPassword)
+
+	// Execute request
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("HTTP request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// Parse JSON-RPC response
+	var rpcResp RPCResponse
+	if err := json.Unmarshal(body, &rpcResp); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	// Check for RPC error
+	if rpcResp.Error != nil {
+		return nil, fmt.Errorf("RPC error code %d: %s", rpcResp.Error.Code, rpcResp.Error.Message)
+	}
+
+	return rpcResp.Result, nil
 }
 
 // AddBambooKV submits a key-value pair via addbambookv
