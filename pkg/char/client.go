@@ -206,8 +206,8 @@ func encodeReferendumVote(ballotNumber int, payloadHex string) string {
 	// Leaf type = 0x00 for REFERENDUM_VOTE
 	buf.WriteByte(0x00)
 
-	// Ballot number as varint
-	writeVarint(buf, uint64(ballotNumber))
+	// Ballot number as CompactSize (Bitcoin uses CompactSize for varints)
+	writeCompactSize(buf, uint64(ballotNumber))
 
 	// Payload length as CompactSize
 	writeCompactSize(buf, uint64(len(payload)))
@@ -219,10 +219,23 @@ func encodeReferendumVote(ballotNumber int, payloadHex string) string {
 }
 
 // writeVarint writes a Bitcoin-style varint
+// For values < 253: single byte
+// For values <= 0xFFFF: 0xFD followed by 2 bytes (little endian)
+// For values <= 0xFFFFFFFF: 0xFE followed by 4 bytes (little endian)
+// For larger values: 0xFF followed by 8 bytes (little endian)
 func writeVarint(buf *bytes.Buffer, n uint64) {
-	tmp := make([]byte, binary.MaxVarintLen64)
-	size := binary.PutUvarint(tmp, n)
-	buf.Write(tmp[:size])
+	if n < 0xFD {
+		buf.WriteByte(byte(n))
+	} else if n <= 0xFFFF {
+		buf.WriteByte(0xFD)
+		binary.Write(buf, binary.LittleEndian, uint16(n))
+	} else if n <= 0xFFFFFFFF {
+		buf.WriteByte(0xFE)
+		binary.Write(buf, binary.LittleEndian, uint32(n))
+	} else {
+		buf.WriteByte(0xFF)
+		binary.Write(buf, binary.LittleEndian, n)
+	}
 }
 
 // writeCompactSize writes a Bitcoin-style CompactSize
@@ -270,8 +283,8 @@ func (c *Client) SubmitAndWaitForConfirmation(appPreimage, dataHex string, ballo
 	// Encode as referendum vote
 	voteHex := encodeReferendumVote(ballotNumber, dataHex)
 
-	// Submit with slotize=true (let CHAR wrap in slot format)
-	response, err := c.AddBambooKV(appPreimage, voteHex, true)
+	// Submit with slotize=false (data already in referendum vote format)
+	response, err := c.AddBambooKV(appPreimage, voteHex, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to submit vote: %w", err)
 	}
