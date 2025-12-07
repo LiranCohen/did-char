@@ -3,6 +3,7 @@ module github.com/yourusername/did-char
 go 1.21
 
 require (
+	github.com/brianvoe/gofakeit/v6 v6.28.0
 	github.com/mattn/go-sqlite3 v1.14.32
 	github.com/spf13/cobra v1.10.2
 )
