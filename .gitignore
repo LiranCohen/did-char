@@ -1,0 +1,36 @@
+# Binaries
+did-char
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binaries
+*.test
+*.out
+
+# Go workspace file
+go.work
+
+# Database files
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Config files (use config.yaml.example as template)
+config.yaml
+
+# Key files
+did_char_*.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
