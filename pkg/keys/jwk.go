@@ -44,8 +44,8 @@ func PublicKeyToJWK(key *ecdsa.PublicKey, keyID string) *JWK {
 		ID:  keyID,
 		Kty: "EC",
 		Crv: "P-256",
-		X:   crypto.Base64URLEncode(key.PublicKey.X.Bytes()),
-		Y:   crypto.Base64URLEncode(key.PublicKey.Y.Bytes()),
+		X:   crypto.Base64URLEncode(key.X.Bytes()),
+		Y:   crypto.Base64URLEncode(key.Y.Bytes()),
 	}
 }
 

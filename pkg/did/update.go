@@ -144,7 +144,7 @@ func UpdateDID(
 
 	// Encode payload
 	suffix, _ := ParseDID(req.DID)
-	payloadHex, err := encoding.EncodePayload(OperationTypeUpdate, suffix, updateOp)
+	payloadHex, err := encoding.EncodePayload(encoding.OperationTypeUpdate, suffix, updateOp)
 	if err != nil {
 		return fmt.Errorf("failed to encode payload: %w", err)
 	}

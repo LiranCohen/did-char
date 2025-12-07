@@ -2,16 +2,6 @@ package did
 
 import "github.com/yourusername/did-char/pkg/keys"
 
-// OperationType represents the type of DID operation
-type OperationType byte
-
-const (
-	OperationTypeCreate     OperationType = 0x01
-	OperationTypeUpdate     OperationType = 0x02
-	OperationTypeRecover    OperationType = 0x03
-	OperationTypeDeactivate OperationType = 0x04
-)
-
 // CreateOperation represents a CREATE operation
 type CreateOperation struct {
 	Type                   string      `json:"type"`

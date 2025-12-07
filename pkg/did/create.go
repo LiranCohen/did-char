@@ -45,12 +45,12 @@ func CreateDID(
 	}
 
 	// Generate commitments
-	updateCommitment, updateReveal, err := GenerateCommitment(updateKey)
+	updateCommitment, _, err := GenerateCommitment(updateKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate update commitment: %w", err)
 	}
 
-	recoveryCommitment, recoveryReveal, err := GenerateCommitment(recoveryKey)
+	recoveryCommitment, _, err := GenerateCommitment(recoveryKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate recovery commitment: %w", err)
 	}
@@ -106,7 +106,7 @@ func CreateDID(
 	ballotNumber := lastBallot + 1
 
 	// Encode payload
-	payloadHex, err := encoding.EncodePayload(OperationTypeCreate, suffix, createOp)
+	payloadHex, err := encoding.EncodePayload(encoding.OperationTypeCreate, suffix, createOp)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode payload: %w", err)
 	}

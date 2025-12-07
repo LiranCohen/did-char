@@ -7,14 +7,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-
-	"github.com/yourusername/did-char/pkg/did"
 )
 
 const PayloadVersion byte = 0x01
 
+// OperationType represents the type of DID operation
+type OperationType byte
+
+const (
+	OperationTypeCreate     OperationType = 0x01
+	OperationTypeUpdate     OperationType = 0x02
+	OperationTypeRecover    OperationType = 0x03
+	OperationTypeDeactivate OperationType = 0x04
+)
+
 // EncodePayload encodes a DID operation into a binary payload
-func EncodePayload(opType did.OperationType, didSuffix string, operationData interface{}) (string, error) {
+func EncodePayload(opType OperationType, didSuffix string, operationData interface{}) (string, error) {
 	buf := new(bytes.Buffer)
 
 	// Version
@@ -46,7 +54,7 @@ func EncodePayload(opType did.OperationType, didSuffix string, operationData int
 }
 
 // DecodePayload decodes a binary payload into operation components
-func DecodePayload(hexData string) (version byte, opType did.OperationType, didSuffix string, operationJSON []byte, err error) {
+func DecodePayload(hexData string) (version byte, opType OperationType, didSuffix string, operationJSON []byte, err error) {
 	data, err := hex.DecodeString(hexData)
 	if err != nil {
 		return 0, 0, "", nil, fmt.Errorf("invalid hex: %w", err)
@@ -65,7 +73,7 @@ func DecodePayload(hexData string) (version byte, opType did.OperationType, didS
 	if err != nil {
 		return 0, 0, "", nil, fmt.Errorf("failed to read operation type: %w", err)
 	}
-	opType = did.OperationType(opTypeByte)
+	opType = OperationType(opTypeByte)
 
 	// DID suffix
 	suffixLen, err := readVarint(buf)
