@@ -12,17 +12,32 @@ DID-CHAR combines:
 ## Quick Start
 
 ```bash
+# Build
+go build -o did-char ./cmd/did-char
+
+# Run the demo
+./demo.sh
+
+# Or try commands manually:
+
 # Create a DID (generates keys automatically)
-did-char create
-# Output: Created did:char:EiDahaOGH-liLLdDtTxEAdc8i-cfCz-WUcQdRJheMVNn3A
-# Keys saved to: did_char_EiDahaOGH-liLLdDtTxEAdc8i-cfCz-WUcQdRJheMVNn3A.json
+./did-char create --verbose
+# Output: Created did:char:y6iHpgYsUfueGwqSI88JWwhXCE2saXjEcS1jsegPzjo
+# Keys saved to: did_char_y6iHpgYsUfueGwqSI88JWwhXCE2saXjEcS1jsegPzjo.json
 
-# Update it (reads keys from DID's JSON file)
-did-char update did:char:EiDahaOGH-liLLdDtTxEAdc8i-cfCz-WUcQdRJheMVNn3A \
-  --add-key new-key.jwk
+# Generate and add a service
+./did-char generate-service --type LinkedDomains --output service.json
+./did-char update <did> --add-service "$(cat service.json)" --verbose
 
-# Resolve it
-did-char resolve did:char:EiDahaOGH-liLLdDtTxEAdc8i-cfCz-WUcQdRJheMVNn3A
+# Generate and add a public key
+./did-char generate-key --output key.jwk
+./did-char update <did> --add-public-key key.jwk --verbose
+
+# Resolve with history
+./did-char resolve <did> --history
+
+# Check status
+./did-char status
 ```
 
 ## Core Commands
