@@ -280,11 +280,9 @@ func (c *Client) PollForConfirmation(domain string, ballotNumber int, maxAttempt
 
 // SubmitAndWaitForConfirmation submits a referendum vote and polls until confirmed
 func (c *Client) SubmitAndWaitForConfirmation(appPreimage, dataHex string, ballotNumber int, pollingCfg config.PollingConfig) (*DecisionRollResponse, error) {
-	// Encode as referendum vote
-	voteHex := encodeReferendumVote(ballotNumber, dataHex)
-
-	// Submit with slotize=false (data already in referendum vote format)
-	response, err := c.AddBambooKV(appPreimage, voteHex, false)
+	// Submit raw DID payload with slotize=true
+	// CHAR will handle referendum vote encoding AND slot wrapping
+	response, err := c.AddBambooKV(appPreimage, dataHex, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to submit vote: %w", err)
 	}
