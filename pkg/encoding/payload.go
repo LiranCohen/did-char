@@ -21,7 +21,10 @@ const (
 	OperationTypeDeactivate OperationType = 0x04
 )
 
-// EncodePayload encodes a DID operation into a binary payload
+// EncodePayload encodes a DID operation into a binary payload (hex string)
+//
+// Returns the complete encoded operation including: version, operation type, DID suffix, and operation data.
+// This encoded payload is what gets submitted to CHAR for inclusion in ballots.
 func EncodePayload(opType OperationType, didSuffix string, operationData interface{}) (string, error) {
 	buf := new(bytes.Buffer)
 

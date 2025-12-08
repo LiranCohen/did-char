@@ -278,10 +278,15 @@ func (c *Client) PollForConfirmation(domain string, ballotNumber int, maxAttempt
 	return nil, fmt.Errorf("timeout: ballot %d not confirmed with data after %d attempts", ballotNumber, maxAttempts)
 }
 
-// SubmitAndWaitForConfirmation submits a referendum vote and polls until confirmed
+// SubmitAndWaitForConfirmation submits a DID operation to CHAR and polls until confirmed
+//
+// The dataHex parameter is the complete encoded DID operation payload (not just raw DID data).
+// It includes: version, operation type, DID suffix, and operation-specific data.
+//
+// With slotize=true, CHAR handles referendum vote encoding and slot wrapping automatically.
 func (c *Client) SubmitAndWaitForConfirmation(appPreimage, dataHex string, ballotNumber int, pollingCfg config.PollingConfig) (*DecisionRollResponse, error) {
-	// Submit raw DID payload with slotize=true
-	// CHAR will handle referendum vote encoding AND slot wrapping
+	// Submit the encoded DID operation with slotize=true
+	// CHAR will handle referendum vote encoding and slot wrapping
 	response, err := c.AddBambooKV(appPreimage, dataHex, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to submit vote: %w", err)
