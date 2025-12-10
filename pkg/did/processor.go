@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 
 	"github.com/yourusername/did-char/pkg/char"
 	"github.com/yourusername/did-char/pkg/encoding"
@@ -45,25 +46,30 @@ func (p *Processor) ProcessBallot(ballotNumber int) error {
 		return nil
 	}
 
-	// Strip CHAR ballot wrapper (first 5 bytes: 0000 + CompactSize varint)
 	payloadHex := roll.DecisionRoll.Data
-	if len(payloadHex) > 10 { // At least 5 bytes = 10 hex chars
-		// Skip the wrapper: 0000fdXXXX or similar
-		payloadHex = stripBallotWrapper(payloadHex)
+
+	// Skip empty/null ballots (length <= 8 hex chars = 4 bytes)
+	if len(payloadHex) <= 8 {
+		return nil
 	}
+
+	payloadHex = stripWrappers(payloadHex)
 
 	version, opType, didSuffix, operationJSON, err := encoding.DecodePayload(payloadHex)
 	if err != nil {
+		log.Printf("Failed to decode payload for ballot %d: %v", ballotNumber, err)
 		// Invalid or empty payload, skip this ballot
 		return nil
 	}
 
 	if version != encoding.PayloadVersion {
+		fmt.Printf("Unsupported payload version %d for ballot %d\n", version, ballotNumber)
 		// Unsupported version, skip this ballot (likely non-DID data)
 		return nil
 	}
 
 	did := FormatDID(didSuffix)
+	fmt.Printf("Processing DID %s operation type %d on ballot %d\n", did, opType, ballotNumber)
 
 	// Process based on operation type
 	switch opType {
@@ -76,6 +82,7 @@ func (p *Processor) ProcessBallot(ballotNumber int) error {
 	case encoding.OperationTypeDeactivate:
 		return p.processDeactivate(did, operationJSON, ballotNumber)
 	default:
+		fmt.Printf("Unknown operation type %d for ballot %d\n", opType, ballotNumber)
 		return fmt.Errorf("unknown operation type: %d", opType)
 	}
 }
@@ -328,28 +335,88 @@ func (p *Processor) SyncFromBallot(startBallot int, maxBallots int) (int, error)
 	return processedCount, nil
 }
 
-// stripBallotWrapper removes the CHAR ballot wrapper from payload hex
-func stripBallotWrapper(hexData string) string {
-	// CHAR wraps the payload with: 0000 + CompactSize varint indicating length
-	// We need to skip past this wrapper to get to the actual DID payload
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
 
+// stripWrappers removes CHAR slot wrapper or referendum vote wrapper from payload hex
+func stripWrappers(hexData string) string {
 	data, err := hex.DecodeString(hexData)
-	if err != nil || len(data) < 5 {
-		return hexData // Return as-is if can't decode
+	if err != nil || len(data) < 3 {
+		return hexData
 	}
 
-	// Skip first 2 bytes (0000) and parse CompactSize varint
+	// Check if it starts with CHAR slot wrapper: 0000
+	if data[0] == 0x00 && data[1] == 0x00 {
+		// CHAR slot format: [0x00][0x00][CompactSize length][payload]
+		return stripSlotWrapper(hexData)
+	}
+
+	// Check if it starts with referendum vote wrapper: 0x00 (leaf type)
+	if data[0] == 0x00 {
+		// Referendum vote format: [0x00][varint ballot][compact_size length][payload]
+		return stripReferendumVoteWrapper(hexData)
+	}
+
+	// No recognized wrapper, return as-is
+	return hexData
+}
+
+// stripSlotWrapper removes CHAR slot format wrapper
+func stripSlotWrapper(hexData string) string {
+	data, _ := hex.DecodeString(hexData)
+	if len(data) < 3 {
+		return hexData
+	}
+
+	// Parse CompactSize at position 2
 	if data[2] < 0xfd {
-		// 1-byte length
-		return hexData[6:] // Skip 0000 + 1 byte varint = 3 bytes = 6 hex chars
+		return hexData[6:] // Skip 0000 + 1 byte = 3 bytes = 6 hex chars
 	} else if data[2] == 0xfd {
-		// 3-byte length (fd + 2 bytes)
 		return hexData[10:] // Skip 0000 + fd + 2 bytes = 5 bytes = 10 hex chars
 	} else if data[2] == 0xfe {
-		// 5-byte length (fe + 4 bytes)
 		return hexData[14:] // Skip 0000 + fe + 4 bytes = 7 bytes = 14 hex chars
 	} else {
-		// 9-byte length (ff + 8 bytes)
 		return hexData[22:] // Skip 0000 + ff + 8 bytes = 11 bytes = 22 hex chars
 	}
+}
+
+// stripReferendumVoteWrapper removes referendum vote wrapper
+func stripReferendumVoteWrapper(hexData string) string {
+	data, _ := hex.DecodeString(hexData)
+	if len(data) < 3 {
+		return hexData
+	}
+
+	offset := 1 // Skip leaf type byte
+
+	// Skip Go varint ballot number (we need to read it to know its length)
+	for offset < len(data) {
+		if data[offset] < 0x80 {
+			offset++ // Last byte of varint
+			break
+		}
+		offset++ // Continue reading varint
+	}
+
+	if offset >= len(data) {
+		return hexData // Invalid
+	}
+
+	// Skip CompactSize payload length
+	if data[offset] < 0xfd {
+		offset += 1
+	} else if data[offset] == 0xfd {
+		offset += 3
+	} else if data[offset] == 0xfe {
+		offset += 5
+	} else {
+		offset += 9
+	}
+
+	// Return payload after all wrappers
+	return hexData[offset*2:]
 }

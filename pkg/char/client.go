@@ -13,6 +13,10 @@ import (
 	"github.com/yourusername/did-char/pkg/config"
 )
 
+var (
+	SLOT_GAP_LIMIT = 500 // Number of slots to check ahead for empty ballot
+)
+
 // Client wraps bitcoin-cli for CHAR RPC calls
 type Client struct {
 	cfg *config.CHARConfig
@@ -146,8 +150,8 @@ func stringToHex(s string) string {
 // GetNextAvailableBallot finds the next empty ballot by searching forward
 func (c *Client) GetNextAvailableBallot(domain string, startFrom int) (int, error) {
 	// Search forward from startFrom, looking for an empty ballot
-	// Check up to 50 ballots ahead
-	for i := 0; i < 50; i++ {
+	// Check up to 500 ballots ahead
+	for i := 0; i < SLOT_GAP_LIMIT; i++ {
 		ballotNum := startFrom + i
 		roll, err := c.GetReferendumDecisionRoll(domain, ballotNum, 0)
 		if err != nil {
@@ -157,11 +161,6 @@ func (c *Client) GetNextAvailableBallot(domain string, startFrom int) (int, erro
 		if !roll.Found {
 			// Ballot doesn't exist yet - use this number (it will exist soon)
 			// Ballots are created every 20 seconds
-			return ballotNum, nil
-		}
-
-		// Check if ballot is empty (no data or data is empty)
-		if roll.DecisionRoll == nil || roll.DecisionRoll.Data == "" || len(roll.DecisionRoll.Data) == 0 {
 			return ballotNum, nil
 		}
 	}
@@ -284,27 +283,20 @@ func (c *Client) PollForConfirmation(domain string, ballotNumber int, maxAttempt
 // It includes: version, operation type, DID suffix, and operation-specific data.
 //
 // With slotize=true, CHAR handles referendum vote encoding and slot wrapping automatically.
-func (c *Client) SubmitAndWaitForConfirmation(appPreimage, dataHex string, ballotNumber int, pollingCfg config.PollingConfig) (*DecisionRollResponse, error) {
+func (c *Client) SubmitAndWaitForConfirmation(appPreimage, dataHex string, ballotNumber int, pollingCfg config.PollingConfig) error {
 	// Submit the encoded DID operation with slotize=true
 	// CHAR will handle referendum vote encoding and slot wrapping
 	response, err := c.AddBambooKV(appPreimage, dataHex, true)
 	if err != nil {
-		return nil, fmt.Errorf("failed to submit vote: %w", err)
+		return fmt.Errorf("failed to submit vote: %w", err)
 	}
 
 	// Check if submission was successful
 	// Response key is hex-encoded domain
 	appPreimageHex := stringToHex(appPreimage)
 	if !response[appPreimageHex] {
-		return nil, fmt.Errorf("vote submission failed for app preimage %s (hex: %s)", appPreimage, appPreimageHex)
+		return fmt.Errorf("vote submission failed for app preimage %s (hex: %s)", appPreimage, appPreimageHex)
 	}
 
-	// Poll for confirmation
-	interval := time.Duration(pollingCfg.IntervalMS) * time.Millisecond
-	roll, err := c.PollForConfirmation(appPreimage, ballotNumber, pollingCfg.MaxAttempts, interval)
-	if err != nil {
-		return nil, fmt.Errorf("failed to confirm ballot: %w", err)
-	}
-
-	return roll, nil
+	return nil
 }

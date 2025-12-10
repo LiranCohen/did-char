@@ -3,6 +3,7 @@ package did
 import (
 	"crypto/ecdsa"
 	"fmt"
+	"strconv"
 
 	"github.com/yourusername/did-char/pkg/char"
 	"github.com/yourusername/did-char/pkg/config"
@@ -18,10 +19,10 @@ type CreateDIDRequest struct {
 
 // CreateDIDResult contains the result of creating a DID
 type CreateDIDResult struct {
-	DID              string
-	KeyFile          *keys.KeyFile
-	Document         *Document
-	BallotNumber     int
+	DID          string
+	KeyFile      *keys.KeyFile
+	Document     *Document
+	BallotNumber int
 }
 
 // CreateDID creates a new DID
@@ -106,11 +107,14 @@ func CreateDID(
 
 	startBallot := 0
 	if lastSyncedStr != "" {
-		fmt.Sscanf(lastSyncedStr, "%d", &startBallot)
+		startBallot, err = strconv.Atoi(lastSyncedStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid last synced ballot in sync state: %w", err)
+		}
 	}
 
-	// Search for next empty ballot starting from last synced + 1
-	ballotNumber, err := charClient.GetNextAvailableBallot(cfg.CHAR.AppPreimage, startBallot+1)
+	// Search for next empty ballot starting from last synced
+	ballotNumber, err := charClient.GetNextAvailableBallot(cfg.CHAR.AppPreimage, startBallot)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find available ballot: %w", err)
 	}
@@ -122,18 +126,13 @@ func CreateDID(
 	}
 
 	// Submit to CHAR and wait for confirmation
-	roll, err := charClient.SubmitAndWaitForConfirmation(
+	if err := charClient.SubmitAndWaitForConfirmation(
 		cfg.CHAR.AppPreimage,
 		payloadHex,
 		ballotNumber,
 		cfg.Polling,
-	)
-	if err != nil {
+	); err != nil {
 		return nil, fmt.Errorf("failed to submit and confirm: %w", err)
-	}
-
-	if !roll.Found {
-		return nil, fmt.Errorf("ballot %d not confirmed", ballotNumber)
 	}
 
 	// Now process the ballot to write to SQLite

@@ -147,8 +147,8 @@ func UpdateDID(
 		fmt.Sscanf(lastSyncedStr, "%d", &startBallot)
 	}
 
-	// Search for next empty ballot starting from last synced + 1
-	ballotNumber, err := charClient.GetNextAvailableBallot(cfg.CHAR.AppPreimage, startBallot+1)
+	// Search for next empty ballot starting from last synced
+	ballotNumber, err := charClient.GetNextAvailableBallot(cfg.CHAR.AppPreimage, startBallot)
 	if err != nil {
 		return fmt.Errorf("failed to find available ballot: %w", err)
 	}
@@ -161,18 +161,13 @@ func UpdateDID(
 	}
 
 	// Submit to CHAR and wait for confirmation
-	roll, err := charClient.SubmitAndWaitForConfirmation(
+	if err := charClient.SubmitAndWaitForConfirmation(
 		cfg.CHAR.AppPreimage,
 		payloadHex,
 		ballotNumber,
 		cfg.Polling,
-	)
-	if err != nil {
+	); err != nil {
 		return fmt.Errorf("failed to submit and confirm: %w", err)
-	}
-
-	if !roll.Found {
-		return fmt.Errorf("ballot %d not confirmed", ballotNumber)
 	}
 
 	// Now process the ballot to write to SQLite
