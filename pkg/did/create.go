@@ -153,7 +153,7 @@ func CreateDID(
 	}
 
 	// Save key file
-	if err := keys.SaveKeyFile(keyFile); err != nil {
+	if err := keys.SaveKeyFile(keyFile, cfg.DataDir.KeysDir); err != nil {
 		return nil, fmt.Errorf("failed to save key file: %w", err)
 	}
 

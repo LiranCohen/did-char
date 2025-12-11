@@ -29,7 +29,7 @@ func UpdateDID(
 ) error {
 
 	// Load key file
-	keyFile, err := keys.LoadKeyFile(req.DID)
+	keyFile, err := keys.LoadKeyFile(req.DID, cfg.DataDir.KeysDir)
 	if err != nil {
 		return fmt.Errorf("failed to load key file: %w", err)
 	}
@@ -181,7 +181,7 @@ func UpdateDID(
 	keyFile.NextUpdateCommitment = newCommitment
 	keyFile.LastOperationBallot = ballotNumber
 
-	if err := keys.SaveKeyFile(keyFile); err != nil {
+	if err := keys.SaveKeyFile(keyFile, cfg.DataDir.KeysDir); err != nil {
 		return fmt.Errorf("failed to update key file: %w", err)
 	}
 

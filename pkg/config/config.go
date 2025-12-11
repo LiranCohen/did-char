@@ -10,6 +10,7 @@ import (
 type Config struct {
 	CHAR     CHARConfig     `yaml:"char"`
 	Database DatabaseConfig `yaml:"database"`
+	DataDir  DataDirConfig  `yaml:"data_dir"`
 	Polling  PollingConfig  `yaml:"polling"`
 }
 
@@ -29,6 +30,13 @@ type DatabaseConfig struct {
 	Path string `yaml:"path"`
 }
 
+// DataDirConfig contains data directory settings
+type DataDirConfig struct {
+	Path    string `yaml:"path"`     // Base data directory
+	KeysDir string `yaml:"keys_dir"` // Where DID private keys are stored
+	DBPath  string `yaml:"db_path"`  // Database file path
+}
+
 // PollingConfig contains polling behavior settings
 type PollingConfig struct {
 	MaxAttempts    int `yaml:"max_attempts"`
@@ -38,6 +46,9 @@ type PollingConfig struct {
 
 // DefaultConfig returns default configuration
 func DefaultConfig() *Config {
+	homeDir, _ := os.UserHomeDir()
+	dataDir := filepath.Join(homeDir, ".did-char")
+
 	return &Config{
 		CHAR: CHARConfig{
 			RPCHost:     "100.67.0.7",
@@ -49,7 +60,12 @@ func DefaultConfig() *Config {
 			AppPreimage: "did-char-domain", // Plain text, will be hex-encoded by client
 		},
 		Database: DatabaseConfig{
-			Path: "./did-char.db",
+			Path: filepath.Join(dataDir, "did-char.db"),
+		},
+		DataDir: DataDirConfig{
+			Path:    dataDir,
+			KeysDir: filepath.Join(dataDir, "keys"),
+			DBPath:  filepath.Join(dataDir, "did-char.db"),
 		},
 		Polling: PollingConfig{
 			MaxAttempts:    300,  // Poll for up to 30 seconds
@@ -92,11 +108,16 @@ func LoadConfig(cfgFile string) (*Config, error) {
 		cfg.Database.Path = val
 	}
 
-	// Ensure database directory exists
-	dbDir := filepath.Dir(cfg.Database.Path)
-	if err := os.MkdirAll(dbDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create database directory: %w", err)
+	// Ensure data directories exist
+	if err := os.MkdirAll(cfg.DataDir.Path, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create data directory: %w", err)
 	}
+	if err := os.MkdirAll(cfg.DataDir.KeysDir, 0700); err != nil { // Keys dir should be more restrictive
+		return nil, fmt.Errorf("failed to create keys directory: %w", err)
+	}
+
+	// Sync database path
+	cfg.Database.Path = cfg.DataDir.DBPath
 
 	return cfg, nil
 }

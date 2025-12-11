@@ -19,18 +19,24 @@ type KeyFile struct {
 }
 
 // GetKeyFilePath returns the path for a DID's key file
-func GetKeyFilePath(did string) string {
+// If keysDir is empty, uses current directory
+func GetKeyFilePath(did string, keysDir string) string {
 	// Extract suffix from did:char:<suffix>
 	suffix := did
 	if len(did) > 9 && did[:9] == "did:char:" {
 		suffix = did[9:]
 	}
-	return fmt.Sprintf("did_char_%s.json", suffix)
+	filename := fmt.Sprintf("did_char_%s.json", suffix)
+
+	if keysDir == "" {
+		return filename
+	}
+	return filepath.Join(keysDir, filename)
 }
 
 // SaveKeyFile saves a key file to disk
-func SaveKeyFile(keyFile *KeyFile) error {
-	path := GetKeyFilePath(keyFile.DID)
+func SaveKeyFile(keyFile *KeyFile, keysDir string) error {
+	path := GetKeyFilePath(keyFile.DID, keysDir)
 
 	data, err := json.MarshalIndent(keyFile, "", "  ")
 	if err != nil {
@@ -40,7 +46,7 @@ func SaveKeyFile(keyFile *KeyFile) error {
 	// Ensure directory exists
 	dir := filepath.Dir(path)
 	if dir != "." && dir != "" {
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0700); err != nil { // More restrictive for keys
 			return fmt.Errorf("failed to create directory: %w", err)
 		}
 	}
@@ -54,8 +60,8 @@ func SaveKeyFile(keyFile *KeyFile) error {
 }
 
 // LoadKeyFile loads a key file from disk
-func LoadKeyFile(did string) (*KeyFile, error) {
-	path := GetKeyFilePath(did)
+func LoadKeyFile(did string, keysDir string) (*KeyFile, error) {
+	path := GetKeyFilePath(did, keysDir)
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -74,8 +80,8 @@ func LoadKeyFile(did string) (*KeyFile, error) {
 }
 
 // KeyFileExists checks if a key file exists for a DID
-func KeyFileExists(did string) bool {
-	path := GetKeyFilePath(did)
+func KeyFileExists(did string, keysDir string) bool {
+	path := GetKeyFilePath(did, keysDir)
 	_, err := os.Stat(path)
 	return err == nil
 }

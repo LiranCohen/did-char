@@ -14,7 +14,7 @@ import (
 )
 
 var (
-	SLOT_GAP_LIMIT = 500 // Number of slots to check ahead for empty ballot
+	SLOT_GAP_LIMIT = 5000 // Number of slots to check ahead for empty ballot (ballots every 20s, so 5000 = ~27 hours)
 )
 
 // Client wraps bitcoin-cli for CHAR RPC calls
@@ -165,7 +165,7 @@ func (c *Client) GetNextAvailableBallot(domain string, startFrom int) (int, erro
 		}
 	}
 
-	return 0, fmt.Errorf("no empty ballot found in range %d to %d", startFrom, startFrom+50)
+	return 0, fmt.Errorf("no empty ballot found in range %d to %d", startFrom, startFrom+SLOT_GAP_LIMIT)
 }
 
 // wrapInSlotFormat wraps data in CHAR slot format
