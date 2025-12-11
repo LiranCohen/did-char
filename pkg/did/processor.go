@@ -7,7 +7,10 @@ import (
 	"log"
 
 	"github.com/yourusername/did-char/pkg/char"
+	"github.com/yourusername/did-char/pkg/crypto"
 	"github.com/yourusername/did-char/pkg/encoding"
+	"github.com/yourusername/did-char/pkg/keys"
+	"github.com/yourusername/did-char/pkg/signing"
 	"github.com/yourusername/did-char/pkg/storage"
 )
 
@@ -105,7 +108,10 @@ func (p *Processor) processCreate(did string, operationJSON []byte, ballotNumber
 	}
 
 	// Save DID to database
-	docJSON, _ := json.Marshal(op.InitialDocument)
+	docJSON, err := json.Marshal(op.InitialDocument)
+	if err != nil {
+		return fmt.Errorf("failed to marshal document: %w", err)
+	}
 	didRecord := &storage.DIDRecord{
 		DID:                 did,
 		Status:              "active",
@@ -135,7 +141,7 @@ func (p *Processor) processCreate(did string, operationJSON []byte, ballotNumber
 	return nil
 }
 
-// processUpdate handles UPDATE operations
+// processUpdate handles UPDATE operations with signature verification
 func (p *Processor) processUpdate(did string, operationJSON []byte, ballotNumber int) error {
 	var op UpdateOperation
 	if err := json.Unmarshal(operationJSON, &op); err != nil {
@@ -161,6 +167,27 @@ func (p *Processor) processUpdate(did string, operationJSON []byte, ballotNumber
 		return fmt.Errorf("reveal value does not match commitment")
 	}
 
+	// Verify the JWS signature and extract signed data
+	signedData, err := verifyUpdateSignature(op.SignedData)
+	if err != nil {
+		return fmt.Errorf("signature verification failed: %w", err)
+	}
+
+	// Verify that the update key in signed data matches the reveal value
+	if err := VerifyKeyMatchesReveal(signedData.UpdateKey, op.RevealValue); err != nil {
+		return fmt.Errorf("update key does not match reveal: %w", err)
+	}
+
+	// Verify delta hash matches the actual delta
+	deltaJSON, err := json.Marshal(op.Delta)
+	if err != nil {
+		return fmt.Errorf("failed to marshal delta: %w", err)
+	}
+	actualDeltaHash := crypto.HashToBase64URL(deltaJSON)
+	if actualDeltaHash != signedData.DeltaHash {
+		return fmt.Errorf("delta hash mismatch: signed %s, actual %s", signedData.DeltaHash, actualDeltaHash)
+	}
+
 	// Parse current document
 	var currentDoc Document
 	if err := json.Unmarshal([]byte(didRecord.Document), &currentDoc); err != nil {
@@ -169,21 +196,21 @@ func (p *Processor) processUpdate(did string, operationJSON []byte, ballotNumber
 
 	// Apply patches
 	updatedDoc := currentDoc
-	for _, patch := range op.Patches {
+	for _, patch := range op.Delta.Patches {
 		switch patch.Action {
-		case "add-public-keys":
+		case PatchActionAddPublicKeys:
 			for _, pk := range patch.PublicKeys {
 				updatedDoc.AddPublicKey(pk)
 			}
-		case "remove-public-keys":
+		case PatchActionRemovePublicKeys:
 			for _, pkID := range patch.PublicKeyIDs {
 				updatedDoc.RemovePublicKey(pkID)
 			}
-		case "add-services":
+		case PatchActionAddServices:
 			for _, svc := range patch.Services {
 				updatedDoc.AddService(svc)
 			}
-		case "remove-services":
+		case PatchActionRemoveServices:
 			for _, svcID := range patch.ServiceIDs {
 				updatedDoc.RemoveService(svcID)
 			}
@@ -191,9 +218,12 @@ func (p *Processor) processUpdate(did string, operationJSON []byte, ballotNumber
 	}
 
 	// Update database
-	docJSON, _ := json.Marshal(updatedDoc)
+	docJSON, err := json.Marshal(updatedDoc)
+	if err != nil {
+		return fmt.Errorf("failed to marshal updated document: %w", err)
+	}
 	didRecord.Document = string(docJSON)
-	didRecord.UpdateCommitment = op.NewCommitment
+	didRecord.UpdateCommitment = op.Delta.UpdateCommitment
 	didRecord.LastOperationBallot = ballotNumber
 
 	if err := p.store.SaveDID(didRecord); err != nil {
@@ -215,7 +245,7 @@ func (p *Processor) processUpdate(did string, operationJSON []byte, ballotNumber
 	return nil
 }
 
-// processRecover handles RECOVER operations
+// processRecover handles RECOVER operations with signature verification
 func (p *Processor) processRecover(did string, operationJSON []byte, ballotNumber int) error {
 	var op RecoverOperation
 	if err := json.Unmarshal(operationJSON, &op); err != nil {
@@ -239,11 +269,50 @@ func (p *Processor) processRecover(did string, operationJSON []byte, ballotNumbe
 		return fmt.Errorf("reveal value does not match recovery commitment")
 	}
 
-	// Replace entire document
-	docJSON, _ := json.Marshal(op.NewDocument)
+	// Verify the JWS signature and extract signed data
+	signedData, err := verifyRecoverSignature(op.SignedData)
+	if err != nil {
+		return fmt.Errorf("signature verification failed: %w", err)
+	}
+
+	// Verify that the recovery key in signed data matches the reveal value
+	if err := VerifyKeyMatchesReveal(signedData.RecoveryKey, op.RevealValue); err != nil {
+		return fmt.Errorf("recovery key does not match reveal: %w", err)
+	}
+
+	// Verify delta hash matches the actual delta
+	deltaJSON, err := json.Marshal(op.Delta)
+	if err != nil {
+		return fmt.Errorf("failed to marshal delta: %w", err)
+	}
+	actualDeltaHash := crypto.HashToBase64URL(deltaJSON)
+	if actualDeltaHash != signedData.DeltaHash {
+		return fmt.Errorf("delta hash mismatch: signed %s, actual %s", signedData.DeltaHash, actualDeltaHash)
+	}
+
+	// Build new document from patches
+	newDoc := NewDocument(did)
+	for _, patch := range op.Delta.Patches {
+		switch patch.Action {
+		case PatchActionAddPublicKeys:
+			for _, pk := range patch.PublicKeys {
+				newDoc.AddPublicKey(pk)
+			}
+		case PatchActionAddServices:
+			for _, svc := range patch.Services {
+				newDoc.AddService(svc)
+			}
+		}
+	}
+
+	// Update database
+	docJSON, err := json.Marshal(newDoc)
+	if err != nil {
+		return fmt.Errorf("failed to marshal new document: %w", err)
+	}
 	didRecord.Document = string(docJSON)
-	didRecord.UpdateCommitment = op.NewUpdateCommitment
-	didRecord.RecoveryCommitment = op.NewRecoveryCommitment
+	didRecord.UpdateCommitment = op.Delta.UpdateCommitment
+	didRecord.RecoveryCommitment = signedData.RecoveryCommitment
 	didRecord.LastOperationBallot = ballotNumber
 
 	if err := p.store.SaveDID(didRecord); err != nil {
@@ -265,7 +334,7 @@ func (p *Processor) processRecover(did string, operationJSON []byte, ballotNumbe
 	return nil
 }
 
-// processDeactivate handles DEACTIVATE operations
+// processDeactivate handles DEACTIVATE operations with signature verification
 func (p *Processor) processDeactivate(did string, operationJSON []byte, ballotNumber int) error {
 	var op DeactivateOperation
 	if err := json.Unmarshal(operationJSON, &op); err != nil {
@@ -287,6 +356,26 @@ func (p *Processor) processDeactivate(did string, operationJSON []byte, ballotNu
 	// Verify reveal matches recovery commitment
 	if !VerifyReveal(op.RevealValue, didRecord.RecoveryCommitment) {
 		return fmt.Errorf("reveal value does not match recovery commitment")
+	}
+
+	// Verify the JWS signature and extract signed data
+	signedData, err := verifyDeactivateSignature(op.SignedData)
+	if err != nil {
+		return fmt.Errorf("signature verification failed: %w", err)
+	}
+
+	// Verify that the recovery key in signed data matches the reveal value
+	if err := VerifyKeyMatchesReveal(signedData.RecoveryKey, op.RevealValue); err != nil {
+		return fmt.Errorf("recovery key does not match reveal: %w", err)
+	}
+
+	// Verify the DID suffix matches
+	suffix, err := ParseDID(did)
+	if err != nil {
+		return fmt.Errorf("failed to parse DID: %w", err)
+	}
+	if signedData.DIDSuffix != did && signedData.DIDSuffix != suffix {
+		return fmt.Errorf("DID suffix mismatch in signed data")
 	}
 
 	// Deactivate
@@ -312,6 +401,121 @@ func (p *Processor) processDeactivate(did string, operationJSON []byte, ballotNu
 	return nil
 }
 
+// verifyUpdateSignature verifies the JWS signature and extracts UpdateSignedData
+func verifyUpdateSignature(signedDataJWS string) (*UpdateSignedData, error) {
+	// Parse the JWS to extract the payload first (to get the key for verification)
+	payload, err := extractJWSPayload(signedDataJWS)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract JWS payload: %w", err)
+	}
+
+	var signedData UpdateSignedData
+	if err := json.Unmarshal(payload, &signedData); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal signed data: %w", err)
+	}
+
+	// Create verifier from the update key in the payload
+	verifier, err := createVerifierFromJWK(signedData.UpdateKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create verifier: %w", err)
+	}
+
+	// Verify signature
+	if err := verifier.Verify(signedDataJWS, payload); err != nil {
+		return nil, fmt.Errorf("signature verification failed: %w", err)
+	}
+
+	return &signedData, nil
+}
+
+// verifyRecoverSignature verifies the JWS signature and extracts RecoverSignedData
+func verifyRecoverSignature(signedDataJWS string) (*RecoverSignedData, error) {
+	payload, err := extractJWSPayload(signedDataJWS)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract JWS payload: %w", err)
+	}
+
+	var signedData RecoverSignedData
+	if err := json.Unmarshal(payload, &signedData); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal signed data: %w", err)
+	}
+
+	verifier, err := createVerifierFromJWK(signedData.RecoveryKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create verifier: %w", err)
+	}
+
+	if err := verifier.Verify(signedDataJWS, payload); err != nil {
+		return nil, fmt.Errorf("signature verification failed: %w", err)
+	}
+
+	return &signedData, nil
+}
+
+// verifyDeactivateSignature verifies the JWS signature and extracts DeactivateSignedData
+func verifyDeactivateSignature(signedDataJWS string) (*DeactivateSignedData, error) {
+	payload, err := extractJWSPayload(signedDataJWS)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract JWS payload: %w", err)
+	}
+
+	var signedData DeactivateSignedData
+	if err := json.Unmarshal(payload, &signedData); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal signed data: %w", err)
+	}
+
+	verifier, err := createVerifierFromJWK(signedData.RecoveryKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create verifier: %w", err)
+	}
+
+	if err := verifier.Verify(signedDataJWS, payload); err != nil {
+		return nil, fmt.Errorf("signature verification failed: %w", err)
+	}
+
+	return &signedData, nil
+}
+
+// extractJWSPayload extracts the payload from a JWS without verification
+func extractJWSPayload(jws string) ([]byte, error) {
+	parts := splitJWS(jws)
+	if len(parts) != 3 {
+		return nil, fmt.Errorf("invalid JWS format: expected 3 parts, got %d", len(parts))
+	}
+
+	payload, err := base64URLDecode(parts[1])
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode payload: %w", err)
+	}
+
+	return payload, nil
+}
+
+// splitJWS splits a JWS compact serialization into parts
+func splitJWS(jws string) []string {
+	var parts []string
+	start := 0
+	for i := 0; i < len(jws); i++ {
+		if jws[i] == '.' {
+			parts = append(parts, jws[start:i])
+			start = i + 1
+		}
+	}
+	parts = append(parts, jws[start:])
+	return parts
+}
+
+// createVerifierFromJWK creates a verifier from a JWK
+func createVerifierFromJWK(jwk *keys.JWK) (signing.Verifier, error) {
+	jwkMap := keys.JWKToMap(jwk)
+	return signing.NewVerifierFromJWK(jwkMap)
+}
+
+// base64URLDecode decodes a base64url string
+func base64URLDecode(s string) ([]byte, error) {
+	return crypto.Base64URLDecode(s)
+}
+
 // SyncFromBallot syncs all ballots starting from a given ballot number
 func (p *Processor) SyncFromBallot(startBallot int, maxBallots int) (int, error) {
 	processedCount := 0
@@ -333,13 +537,6 @@ func (p *Processor) SyncFromBallot(startBallot int, maxBallots int) (int, error)
 	}
 
 	return processedCount, nil
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // stripWrappers removes CHAR slot wrapper or referendum vote wrapper from payload hex
