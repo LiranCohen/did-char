@@ -1,20 +1,23 @@
 package did
 
 import (
-	"crypto/ecdsa"
+	"encoding/json"
 	"fmt"
 	"strconv"
 
 	"github.com/yourusername/did-char/pkg/char"
 	"github.com/yourusername/did-char/pkg/config"
+	"github.com/yourusername/did-char/pkg/crypto"
 	"github.com/yourusername/did-char/pkg/encoding"
 	"github.com/yourusername/did-char/pkg/keys"
+	"github.com/yourusername/did-char/pkg/signing"
 	"github.com/yourusername/did-char/pkg/storage"
 )
 
 // CreateDIDRequest contains parameters for creating a DID
 type CreateDIDRequest struct {
-	Services []Service
+	Services  []Service
+	Algorithm signing.SignatureAlgorithm // ES256, EdDSA, or BLS (default: ES256)
 }
 
 // CreateDIDResult contains the result of creating a DID
@@ -25,7 +28,7 @@ type CreateDIDResult struct {
 	BallotNumber int
 }
 
-// CreateDID creates a new DID
+// CreateDID creates a new DID with the specified algorithm
 func CreateDID(
 	req *CreateDIDRequest,
 	cfg *config.Config,
@@ -33,24 +36,30 @@ func CreateDID(
 	charClient *char.Client,
 ) (*CreateDIDResult, error) {
 
-	// Generate update and recovery keys
-	updateKey, err := keys.GenerateSecp256k1Key()
+	// Default to ES256 if no algorithm specified
+	algorithm := req.Algorithm
+	if algorithm == "" {
+		algorithm = signing.AlgES256
+	}
+
+	// Generate update and recovery keys based on algorithm
+	updateKey, err := generateKeyForAlgorithm(algorithm, "updateKey")
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate update key: %w", err)
 	}
 
-	recoveryKey, err := keys.GenerateSecp256k1Key()
+	recoveryKey, err := generateKeyForAlgorithm(algorithm, "recoveryKey")
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate recovery key: %w", err)
 	}
 
 	// Generate commitments
-	updateCommitment, _, err := GenerateCommitment(updateKey)
+	updateCommitment, _, err := GenerateCommitmentFromJWK(updateKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate update commitment: %w", err)
 	}
 
-	recoveryCommitment, _, err := GenerateCommitment(recoveryKey)
+	recoveryCommitment, _, err := GenerateCommitmentFromJWK(recoveryKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate recovery commitment: %w", err)
 	}
@@ -58,12 +67,12 @@ func CreateDID(
 	// Create initial document (without DID yet)
 	doc := NewDocument("")
 
-	// Add initial public key (from update key)
-	updateJWK := keys.PublicKeyToJWK(&updateKey.PublicKey, "#key-1")
+	// Add initial public key based on algorithm
+	verificationKeyType := getVerificationKeyType(algorithm)
 	doc.AddPublicKey(PublicKey{
 		ID:           "#key-1",
-		Type:         "EcdsaSecp256k1VerificationKey2019",
-		PublicKeyJwk: updateJWK,
+		Type:         verificationKeyType,
+		PublicKeyJwk: getPublicJWK(updateKey),
 	})
 	doc.AddAuthentication("#key-1")
 
@@ -144,8 +153,8 @@ func CreateDID(
 	// Create key file
 	keyFile := &keys.KeyFile{
 		DID:                    did,
-		UpdateKey:              keys.PrivateKeyToJWK(updateKey, "updateKey"),
-		RecoveryKey:            keys.PrivateKeyToJWK(recoveryKey, "recoveryKey"),
+		UpdateKey:              updateKey,
+		RecoveryKey:            recoveryKey,
 		NextUpdateCommitment:   updateCommitment,
 		NextRecoveryCommitment: recoveryCommitment,
 		CreatedAtBallot:        ballotNumber,
@@ -165,17 +174,61 @@ func CreateDID(
 	}, nil
 }
 
-// Helper to generate a new commitment for next operation
-func GenerateNextCommitment(currentKey *ecdsa.PrivateKey) (string, string, *ecdsa.PrivateKey, error) {
-	newKey, err := keys.GenerateSecp256k1Key()
+// generateKeyForAlgorithm generates a key pair for the specified algorithm
+func generateKeyForAlgorithm(algorithm signing.SignatureAlgorithm, keyID string) (*keys.JWK, error) {
+	switch algorithm {
+	case signing.AlgES256:
+		key, err := keys.GenerateSecp256k1Key()
+		if err != nil {
+			return nil, err
+		}
+		return keys.PrivateKeyToJWK(key, keyID), nil
+
+	case signing.AlgEdDSA:
+		key, err := keys.GenerateEd25519Key()
+		if err != nil {
+			return nil, err
+		}
+		return keys.Ed25519PrivateKeyToJWK(key, keyID), nil
+
+	case signing.AlgBLS:
+		key, err := keys.GenerateBLSKey()
+		if err != nil {
+			return nil, err
+		}
+		return keys.BLSPrivateKeyToJWK(key, keyID), nil
+
+	default:
+		return nil, fmt.Errorf("unsupported algorithm: %s", algorithm)
+	}
+}
+
+// getVerificationKeyType returns the appropriate verification key type for the algorithm
+func getVerificationKeyType(algorithm signing.SignatureAlgorithm) string {
+	switch algorithm {
+	case signing.AlgES256:
+		return "EcdsaSecp256k1VerificationKey2019"
+	case signing.AlgEdDSA:
+		return "Ed25519VerificationKey2020"
+	case signing.AlgBLS:
+		return "Bls12381G1Key2020"
+	default:
+		return "JsonWebKey2020"
+	}
+}
+
+// GenerateNextCommitmentForJWK generates a new key of the same type and its commitment
+// This is a helper for operations that need to rotate keys
+func GenerateNextCommitmentForJWK(currentKey *keys.JWK) (*keys.JWK, string, string, error) {
+	newKey, commitment, err := generateNextKeyAndCommitment(currentKey)
 	if err != nil {
-		return "", "", nil, err
+		return nil, "", "", err
 	}
 
-	commitment, reveal, err := GenerateCommitment(newKey)
-	if err != nil {
-		return "", "", nil, err
-	}
+	// Compute reveal value
+	pubJWK := getPublicJWK(newKey)
+	pubJWKJSON, _ := json.Marshal(pubJWK)
+	revealValue := crypto.HashToBase64URL(pubJWKJSON)
 
-	return commitment, reveal, newKey, nil
+	return newKey, commitment, revealValue, nil
 }

@@ -2,6 +2,7 @@ package keys
 
 import (
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
@@ -11,14 +12,15 @@ import (
 	"github.com/yourusername/did-char/pkg/crypto"
 )
 
-// JWK represents a JSON Web Key
+// JWK represents a JSON Web Key supporting EC (P-256), OKP (Ed25519, BLS12-381)
 type JWK struct {
 	ID  string `json:"id,omitempty"`
-	Kty string `json:"kty"`
-	Crv string `json:"crv"`
+	Kty string `json:"kty"`           // "EC" for ECDSA, "OKP" for Ed25519/BLS
+	Crv string `json:"crv"`           // "P-256", "Ed25519", or "BLS12-381-G1"
+	Alg string `json:"alg,omitempty"` // "ES256", "EdDSA", or "BLS"
 	X   string `json:"x"`
-	Y   string `json:"y"`
-	D   string `json:"d,omitempty"` // Private key (omit for public)
+	Y   string `json:"y,omitempty"`   // Not used for Ed25519/BLS
+	D   string `json:"d,omitempty"`   // Private key (omit for public)
 }
 
 // GenerateSecp256k1Key generates a new secp256k1 key pair
@@ -120,4 +122,119 @@ func UnmarshalJWK(data []byte) (*JWK, error) {
 		return nil, err
 	}
 	return &jwk, nil
+}
+
+// Ed25519 Key Functions
+
+// GenerateEd25519Key generates a new Ed25519 key pair
+func GenerateEd25519Key() (ed25519.PrivateKey, error) {
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	return priv, err
+}
+
+// Ed25519PrivateKeyToJWK converts an Ed25519 private key to JWK
+func Ed25519PrivateKeyToJWK(key ed25519.PrivateKey, keyID string) *JWK {
+	return &JWK{
+		ID:  keyID,
+		Kty: "OKP",
+		Crv: "Ed25519",
+		Alg: "EdDSA",
+		X:   crypto.Base64URLEncode(key.Public().(ed25519.PublicKey)),
+		D:   crypto.Base64URLEncode(key.Seed()),
+	}
+}
+
+// Ed25519PublicKeyToJWK converts an Ed25519 public key to JWK
+func Ed25519PublicKeyToJWK(key ed25519.PublicKey, keyID string) *JWK {
+	return &JWK{
+		ID:  keyID,
+		Kty: "OKP",
+		Crv: "Ed25519",
+		Alg: "EdDSA",
+		X:   crypto.Base64URLEncode(key),
+	}
+}
+
+// JWKToEd25519PrivateKey converts a JWK to an Ed25519 private key
+func JWKToEd25519PrivateKey(jwk *JWK) (ed25519.PrivateKey, error) {
+	if jwk.Kty != "OKP" || jwk.Crv != "Ed25519" {
+		return nil, fmt.Errorf("JWK is not an Ed25519 key: kty=%s, crv=%s", jwk.Kty, jwk.Crv)
+	}
+	if jwk.D == "" {
+		return nil, fmt.Errorf("JWK does not contain private key (d)")
+	}
+
+	seed, err := crypto.Base64URLDecode(jwk.D)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode D: %w", err)
+	}
+
+	return ed25519.NewKeyFromSeed(seed), nil
+}
+
+// JWKToEd25519PublicKey converts a JWK to an Ed25519 public key
+func JWKToEd25519PublicKey(jwk *JWK) (ed25519.PublicKey, error) {
+	if jwk.Kty != "OKP" || jwk.Crv != "Ed25519" {
+		return nil, fmt.Errorf("JWK is not an Ed25519 key: kty=%s, crv=%s", jwk.Kty, jwk.Crv)
+	}
+
+	xBytes, err := crypto.Base64URLDecode(jwk.X)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode X: %w", err)
+	}
+
+	if len(xBytes) != ed25519.PublicKeySize {
+		return nil, fmt.Errorf("invalid Ed25519 public key size: %d", len(xBytes))
+	}
+
+	return ed25519.PublicKey(xBytes), nil
+}
+
+// JWKToMap converts a JWK struct to a map for signing operations
+func JWKToMap(jwk *JWK) map[string]interface{} {
+	m := map[string]interface{}{
+		"kty": jwk.Kty,
+		"crv": jwk.Crv,
+		"x":   jwk.X,
+	}
+	if jwk.ID != "" {
+		m["id"] = jwk.ID
+	}
+	if jwk.Alg != "" {
+		m["alg"] = jwk.Alg
+	}
+	if jwk.Y != "" {
+		m["y"] = jwk.Y
+	}
+	if jwk.D != "" {
+		m["d"] = jwk.D
+	}
+	return m
+}
+
+// MapToJWK converts a map to a JWK struct
+func MapToJWK(m map[string]interface{}) *JWK {
+	jwk := &JWK{}
+	if v, ok := m["id"].(string); ok {
+		jwk.ID = v
+	}
+	if v, ok := m["kty"].(string); ok {
+		jwk.Kty = v
+	}
+	if v, ok := m["crv"].(string); ok {
+		jwk.Crv = v
+	}
+	if v, ok := m["alg"].(string); ok {
+		jwk.Alg = v
+	}
+	if v, ok := m["x"].(string); ok {
+		jwk.X = v
+	}
+	if v, ok := m["y"].(string); ok {
+		jwk.Y = v
+	}
+	if v, ok := m["d"].(string); ok {
+		jwk.D = v
+	}
+	return jwk
 }

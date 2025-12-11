@@ -7,6 +7,9 @@ import (
 	"github.com/yourusername/did-char/pkg/crypto"
 )
 
+// DIDPrefix is the prefix for all did:char DIDs
+const DIDPrefix = "did:char:"
+
 // GenerateDIDSuffix generates a DID suffix from initial state
 func GenerateDIDSuffix(initialState interface{}) (string, error) {
 	// Canonicalize to JSON
@@ -22,13 +25,14 @@ func GenerateDIDSuffix(initialState interface{}) (string, error) {
 
 // FormatDID formats a suffix as a full DID URI
 func FormatDID(suffix string) string {
-	return fmt.Sprintf("did:char:%s", suffix)
+	return DIDPrefix + suffix
 }
 
 // ParseDID extracts the suffix from a DID URI
 func ParseDID(did string) (string, error) {
-	if len(did) < 10 || did[:9] != "did:char:" {
+	prefixLen := len(DIDPrefix)
+	if len(did) <= prefixLen || did[:prefixLen] != DIDPrefix {
 		return "", fmt.Errorf("invalid DID format: %s", did)
 	}
-	return did[9:], nil
+	return did[prefixLen:], nil
 }
