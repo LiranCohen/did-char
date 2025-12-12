@@ -25,6 +25,9 @@ type CHARConfig struct {
 	AppPreimage string `yaml:"app_preimage"`
 }
 
+// Namespace is the CHAR ballot namespace for did:char operations
+const Namespace = "did-char-namespace"
+
 // DatabaseConfig contains database settings
 type DatabaseConfig struct {
 	Path string `yaml:"path"`
@@ -56,8 +59,8 @@ func DefaultConfig() *Config {
 			RPCUser:     "char",
 			RPCPassword: "char",
 			Network:     "regtest",
-			AppDomain:   "did-char-domain",
-			AppPreimage: "did-char-domain", // Plain text, will be hex-encoded by client
+			AppDomain:   Namespace,
+			AppPreimage: Namespace,
 		},
 		Database: DatabaseConfig{
 			Path: filepath.Join(dataDir, "did-char.db"),

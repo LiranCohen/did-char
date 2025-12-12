@@ -4,8 +4,8 @@ char:
   rpc_user: "char"
   rpc_password: "char"
   network: "regtest"
-  app_domain: "did-char-domain"
-  app_preimage: "6469642d636861722d646f6d61696e"  # hex("did-char-domain")
+  app_domain: "did-char-namespace"
+  app_preimage: "did-char-namespace"
 
 database:
   path: "./did-char.db"
